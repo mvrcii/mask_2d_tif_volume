@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Multi-worker streaming pipeline with resume functionality:
   pre×N (CPU workers)  →  q_in   →  gpu (1 GPU proc)  →  q_out  →  post×M (CPU workers)
@@ -7,6 +6,7 @@ Single live-updating status panel shows progress and queue depths.
 Automatically skips files that already exist in output directory.
 """
 
+import argparse
 import os
 import pathlib
 import queue
@@ -25,15 +25,56 @@ from rich.panel import Panel
 from rich.text import Text
 from skimage.io import imread
 
-from config import Config as C
-
 console = Console()
 
 
-def get_pending_files():
+def parse_args():
+    parser = argparse.ArgumentParser(description='Multi-worker nnUNet inference pipeline')
+
+    # Paths
+    parser.add_argument('--input-dir', type=str, required=True,
+                        help='Input directory containing .tif files')
+    parser.add_argument('--output-dir', type=str,
+                        help='Output directory for processed files (default: input-dir with volumes→volumes_masked)')
+    parser.add_argument('--model-dir', type=str, default='./models/nnUNetTrainerV2__nnUNetPlans__2d',
+                        help='nnUNet model directory (default: ./models/nnUNetTrainerV2__nnUNetPlans__2d)')
+    parser.add_argument('--temp-dir', type=str, default='/dev/shm/nnunet_tmp',
+                        help='Temporary directory (default: /dev/shm/nnunet_tmp)')
+
+    # Pipeline parameters
+    parser.add_argument('--downscale-factor', type=int, default=4,
+                        help='Image downscaling factor (default: 4)')
+    parser.add_argument('--n-preproc', type=int, default=16,
+                        help='Number of preprocessing workers (default: 16)')
+    parser.add_argument('--n-postproc', type=int, default=16,
+                        help='Number of postprocessing workers (default: 16)')
+    parser.add_argument('--queue-size', '-q', type=int, default=512,
+                        help='Maximum queue size for buffering (default: 512)')
+
+    args = parser.parse_args()
+
+    # Set default output directory if not provided
+    if args.output_dir is None:
+        input_path = pathlib.Path(args.input_dir)
+        if 'volumes' in input_path.parts:
+            # Replace 'volumes' with 'volumes_masked' in the path
+            parts = list(input_path.parts)
+            for i, part in enumerate(parts):
+                if part == 'volumes':
+                    parts[i] = 'volumes_masked'
+                    break
+            args.output_dir = str(pathlib.Path(*parts))
+        else:
+            # Fallback: append '_masked' to the input directory name
+            args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
+
+    return args
+
+
+def get_pending_files(args):
     """Returns list of files that need processing (not already in output dir)"""
-    input_dir = pathlib.Path(C.input_dir)
-    output_dir = pathlib.Path(C.output_dir)
+    input_dir = pathlib.Path(args.input_dir)
+    output_dir = pathlib.Path(args.output_dir)
 
     all_files = list(input_dir.glob("*.tif"))
     if not output_dir.exists():
@@ -96,7 +137,8 @@ def pad_to_stride(img: np.ndarray, stride_xy: tuple[int, int]):
     return img, (h, w)
 
 
-def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_counter: Value, failed_files: list):
+def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_counter: Value, failed_files: list,
+               args):
     """Single preprocessing worker - reads from file_queue, outputs to q_in"""
     try:
         while not stop.is_set():
@@ -111,8 +153,8 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
                 img = imread(tif_path)
                 original_dtype = img.dtype
                 downscaled_shape = (
-                    img.shape[0] // C.downscale_factor,
-                    img.shape[1] // C.downscale_factor
+                    img.shape[0] // args.downscale_factor,
+                    img.shape[1] // args.downscale_factor
                 )
 
                 img_ds = cv2.resize(img, (downscaled_shape[1], downscaled_shape[0]),
@@ -132,18 +174,18 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
 
 
 def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter: Value, gpu_times: list,
-             gpu_ready: Event):
+             gpu_ready: Event, args):
     try:
         console.print("[yellow]Initializing GPU and loading model...[/yellow]")
         device = torch.device('cuda')
-        predictor = nnUNetPredictor(tile_step_size=C.tile_step_size,
+        predictor = nnUNetPredictor(tile_step_size=1.0,  # no overlap = fastest (slight quality loss)
                                     use_gaussian=True,
-                                    use_mirroring=C.use_mirroring,
+                                    use_mirroring=False,  # test-time aug; True = slower but tiny accuracy gain
                                     perform_everything_on_device=True,
                                     device=device, verbose=False)
 
-        ckpt = next(p for p in (pathlib.Path(C.model_dir) / "fold_0").glob("checkpoint_*.pth"))
-        predictor.initialize_from_trained_model_folder(C.model_dir, use_folds=(0,), checkpoint_name=ckpt.name)
+        ckpt = next(p for p in (pathlib.Path(args.model_dir) / "fold_0").glob("checkpoint_*.pth"))
+        predictor.initialize_from_trained_model_folder(args.model_dir, use_folds=(0,), checkpoint_name=ckpt.name)
 
         predictor.network.to(device).half()
 
@@ -189,14 +231,14 @@ def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter
         raise
     finally:
         # Signal post workers to stop
-        for _ in range(C.n_postproc):
+        for _ in range(args.n_postproc):
             q_out.put(None)
 
 
-def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_files: list):
+def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_files: list, args):
     """Single postprocessing worker - reads from q_out"""
     try:
-        out_dir = pathlib.Path(C.output_dir)
+        out_dir = pathlib.Path(args.output_dir)
 
         while not stop.is_set():
             try:
@@ -218,7 +260,7 @@ def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_f
                 mask = (logits < 0.5).astype(np.uint8)
                 H, W = orig_shape
                 mask_us = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
-                img = tifffile.imread(pathlib.Path(C.input_dir) / fname).astype(np.dtype(dtype_str))
+                img = tifffile.imread(pathlib.Path(args.input_dir) / fname).astype(np.dtype(dtype_str))
 
                 # Atomic write: temp file first, then rename
                 temp_path = output_path.with_suffix('.tmp')
@@ -239,11 +281,13 @@ def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_f
 
 def main():
     freeze_support()
-    os.makedirs(C.output_dir, exist_ok=True)
+    args = parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # Get file counts for resume functionality
-    all_input_files = list(pathlib.Path(C.input_dir).glob("*.tif"))
-    pending_files = get_pending_files()
+    all_input_files = list(pathlib.Path(args.input_dir).glob("*.tif"))
+    pending_files = get_pending_files(args)
 
     total_files = len(all_input_files)
     skipped_files = total_files - len(pending_files)
@@ -267,8 +311,8 @@ def main():
 
     # Queues
     file_queue = JoinableQueue()  # feeds file paths to pre workers
-    q_in = JoinableQueue(maxsize=C.queue_size)  # pre → gpu
-    q_out = JoinableQueue(maxsize=C.queue_size)  # gpu → post
+    q_in = JoinableQueue(maxsize=args.queue_size)  # pre → gpu
+    q_out = JoinableQueue(maxsize=args.queue_size)  # gpu → post
     stop = Event()
     gpu_ready = Event()  # signals when GPU initialization is complete
 
@@ -277,25 +321,25 @@ def main():
         file_queue.put(tif_path)
 
     # Add sentinels for pre workers
-    for _ in range(C.n_preproc):
+    for _ in range(args.n_preproc):
         file_queue.put(None)
 
     # Create worker processes
     pre_workers = [
-        Process(target=pre_worker, args=(file_queue, q_in, stop, pre_counter, failed_files), name=f"PRE-{i}")
-        for i in range(C.n_preproc)
+        Process(target=pre_worker, args=(file_queue, q_in, stop, pre_counter, failed_files, args), name=f"PRE-{i}")
+        for i in range(args.n_preproc)
     ]
 
-    gpu = Process(target=gpu_proc, args=(q_in, q_out, stop, gpu_counter, gpu_times, gpu_ready), name="GPU")
+    gpu = Process(target=gpu_proc, args=(q_in, q_out, stop, gpu_counter, gpu_times, gpu_ready, args), name="GPU")
 
     post_workers = [
-        Process(target=post_worker, args=(q_out, stop, post_counter, failed_files), name=f"POST-{i}")
-        for i in range(C.n_postproc)
+        Process(target=post_worker, args=(q_out, stop, post_counter, failed_files, args), name=f"POST-{i}")
+        for i in range(args.n_postproc)
     ]
 
     all_processes = pre_workers + [gpu] + post_workers
 
-    console.print(f"[green]Starting {C.n_preproc} pre + 1 GPU + {C.n_postproc} post workers[/green]")
+    console.print(f"[green]Starting {args.n_preproc} pre + 1 GPU + {args.n_postproc} post workers[/green]")
     for p in all_processes:
         p.start()
 
