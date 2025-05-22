@@ -65,7 +65,6 @@ def check_and_download_model():
 
     key_files = [
         model_dir / "fold_0" / "checkpoint_best.pth",
-        model_dir / "fold_0" / "checkpoint_final.pth",
         model_dir / "dataset.json",
         model_dir / "plans.json"
     ]
