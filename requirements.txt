@@ -1,0 +1,10 @@
+nnunetv2
+numpy
+scikit-image
+nibabel
+tqdm
+matplotlib
+pillow
+requests
+chardet
+rich
