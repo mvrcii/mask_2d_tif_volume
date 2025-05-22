@@ -10,7 +10,7 @@ class Config:
 
     # --------- pipeline knobs ----------
     downscale_factor = 4
-    threshold = 0.0
+    threshold = 0.5
     n_preproc = 16  # CPU workers that read & down-scale
     n_postproc = 16  # CPU workers that up-scale & save
     queue_size = 512  # how many slices may wait in RAM

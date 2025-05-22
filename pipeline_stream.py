@@ -173,7 +173,7 @@ def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter
             # Time the GPU inference
             start_time = time.time()
             with torch.no_grad():
-                logits = torch.sigmoid(predictor.network(tens))[0, 0].cpu().numpy()  # keep sigmoid for now
+                logits = torch.sigmoid(predictor.network(tens))[0, 0].cpu().numpy()
             gpu_time = time.time() - start_time
             gpu_times.append(gpu_time)
 
