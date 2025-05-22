@@ -134,7 +134,7 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
 def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter: Value, gpu_times: list,
              gpu_ready: Event):
     try:
-        console.print("[yellow]Initializing and loading model...[/yellow]")
+        console.print("[yellow]Initializing GPU and loading model...[/yellow]")
         device = torch.device('cuda')
         predictor = nnUNetPredictor(tile_step_size=C.tile_step_size,
                                     use_gaussian=True,
