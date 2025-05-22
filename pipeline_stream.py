@@ -7,17 +7,17 @@ Single live-updating status panel shows progress and queue depths.
 Automatically skips files that already exist in output directory.
 """
 
-import cv2
-import numpy as np
 import os
 import pathlib
 import queue
 import sys
-import tifffile
 import time
-import torch
 from multiprocessing import Process, JoinableQueue, Event, Value, freeze_support, Manager
 
+import cv2
+import numpy as np
+import tifffile
+import torch
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from rich.console import Console
 from rich.live import Live
@@ -215,7 +215,7 @@ def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_f
                 continue
 
             try:
-                mask = (logits < C.threshold).astype(np.uint8)
+                mask = (logits < 0.5).astype(np.uint8)
                 H, W = orig_shape
                 mask_us = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
                 img = tifffile.imread(pathlib.Path(C.input_dir) / fname).astype(np.dtype(dtype_str))
