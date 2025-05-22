@@ -40,45 +40,23 @@ def check_command_available(command):
 
 def setup_directories():
     """Create necessary directories"""
-    dirs = ["./tmp", "./models"]
+    dirs = ["./models"]
     for d in dirs:
         Path(d).mkdir(parents=True, exist_ok=True)
     return True
 
 
 def check_and_install_packages():
-    """Check and install required Python packages"""
-    packages = [
-        ("torch", "PyTorch"),
-        ("torchvision", "TorchVision"),
-        ("nnunetv2", "nnU-Net v2"),
-        ("numpy", "NumPy"),
-        ("skimage", "scikit-image"),
-        ("nibabel", "NiBabel"),
-        ("rich", "Rich"),
-    ]
+    """Install packages from requirements.txt"""
+    with console.status("[cyan]Installing packages from requirements.txt..."):
+        result = subprocess.run([
+            sys.executable, "-m", "pip", "install", "-r", "requirements.txt"
+        ], capture_output=True, text=True)
 
-    with console.status("[cyan]Checking packages..."):
-        missing = []
-        for import_name, display_name in packages:
-            if not check_python_package(import_name):
-                pip_name = "scikit-image" if import_name == "skimage" else import_name
-                missing.append((pip_name, display_name))
-
-    if not missing:
-        return True, "✓"
-
-    console.print(f"[yellow]○ {len(missing)} to install[/yellow]")
-
-    if not Confirm.ask("Install?", default=True):
-        return False, "✗ Cancelled"
-
-    for pip_name, display_name in missing:
-        with console.status(f"Installing {display_name}..."):
-            if not install_python_package(pip_name):
-                return False, f"✗ Failed: {display_name}"
-
-    return True, f"✓ Installed {len(missing)}"
+        if result.returncode == 0:
+            return True, "✓ Installed from requirements.txt"
+        else:
+            return False, f"✗ Failed: {result.stderr.strip()}"
 
 
 def check_and_download_model():
