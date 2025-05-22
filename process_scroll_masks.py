@@ -2,12 +2,9 @@
 
 import argparse
 import glob
-import multiprocessing
 import os
 import shutil
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
 
 import nibabel as nib
 import numpy as np
@@ -22,7 +19,6 @@ from skimage.transform import resize
 console = Console()
 
 
-# Configuration
 class Config:
     def __init__(self):
         self.input_dir = os.path.expanduser("~/scrollprize/data/scroll4.volpkg/volumes/20231117161658")
@@ -30,14 +26,39 @@ class Config:
         self.model_dir = "./models/nnUNetTrainerV2__nnUNetPlans__2d"
         self.downscale_factor = 4
         self.threshold = 0.5
-        self.n_workers = None
+        self.batch_size = 50  # Process files in batches
         self.temp_dir = "./tmp"
+
+        self._setup_nnunet_env()
+
+    def _setup_nnunet_env(self):
+        """Set up nnUNet environment variables and create directories"""
+        base_temp = os.path.abspath(os.path.join(self.temp_dir, "nnunet_processing"))
+        os.environ["nnUNet_raw"] = os.path.join(base_temp, "nnUNet_raw")
+        os.environ["nnUNet_preprocessed"] = os.path.join(base_temp, "nnUNet_preprocessed")
+        os.environ["nnUNet_results"] = os.path.join(base_temp, "nnUNet_results")
+
+        dataset_name = "Dataset082_scrollmask2"
+
+        directories = [
+            self.temp_dir,
+            base_temp,
+            os.environ["nnUNet_raw"],
+            os.environ["nnUNet_preprocessed"],
+            os.environ["nnUNet_results"],
+            os.path.join(os.environ["nnUNet_raw"], dataset_name),
+            os.path.join(os.environ["nnUNet_raw"], dataset_name, "imagesTs"),
+            os.path.join(os.environ["nnUNet_results"], dataset_name),
+        ]
+
+        for dir_path in directories:
+            os.makedirs(dir_path, exist_ok=True)
 
 
 config = Config()
 
 
-class ScrollMaskProcessor:
+class BatchScrollMaskProcessor:
     def __init__(self, model_dir, threshold=0.5, downscale_factor=4):
         self.model_dir = model_dir
         self.threshold = threshold
@@ -50,7 +71,7 @@ class ScrollMaskProcessor:
         try:
             from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu")
             console.print(f"[blue]Loading nnUNet model on {device}...[/blue]")
 
             self.predictor = nnUNetPredictor(
@@ -61,25 +82,24 @@ class ScrollMaskProcessor:
                 device=device,
                 verbose=False,
                 verbose_preprocessing=False,
-                allow_tqdm=False
+                allow_tqdm=True  # Changed to match working script
             )
 
-            # Fix trainer name in checkpoint if needed
             self._fix_trainer_name()
 
             # Load model weights
             for checkpoint in ["checkpoint_best.pth", "checkpoint_final.pth"]:
                 try:
-                    with console.status(f"[bold yellow]Loading {checkpoint}..."):
-                        self.predictor.initialize_from_trained_model_folder(
-                            self.model_dir,
-                            use_folds=(0,),
-                            checkpoint_name=checkpoint
-                        )
-                    console.print(f"[green]✓[/green] Loaded {checkpoint}")
+                    print(f"Loading {checkpoint}...")
+                    self.predictor.initialize_from_trained_model_folder(
+                        self.model_dir,
+                        use_folds=(0,),
+                        checkpoint_name=checkpoint
+                    )
+                    print(f"✓ Loaded {checkpoint}")
                     break
                 except Exception as e:
-                    console.print(f"[yellow]Failed to load {checkpoint}: {e}[/yellow]")
+                    print(f"Failed to load {checkpoint}: {e}")
                     continue
             else:
                 raise RuntimeError("Could not load any checkpoint")
@@ -89,41 +109,67 @@ class ScrollMaskProcessor:
 
     def _fix_trainer_name(self):
         """Fix trainer name in checkpoint if needed"""
-        for checkpoint_name in ["checkpoint_best.pth", "checkpoint_final.pth"]:
-            checkpoint_path = None
+        checkpoint_names = ["checkpoint_best.pth", "checkpoint_final.pth"]
+        ckpt_path = None
 
-            # Check fold_0 directory first
-            fold_path = os.path.join(self.model_dir, "fold_0", checkpoint_name)
-            if os.path.exists(fold_path):
-                checkpoint_path = fold_path
-            else:
-                # Fallback to model root
-                root_path = os.path.join(self.model_dir, checkpoint_name)
-                if os.path.exists(root_path):
-                    checkpoint_path = root_path
-
-            if checkpoint_path:
-                try:
-                    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-                    if checkpoint.get("trainer_name") != "nnUNetTrainer":
-                        backup_path = checkpoint_path + ".backup"
-                        if not os.path.exists(backup_path):
-                            shutil.copy2(checkpoint_path, backup_path)
-                        checkpoint["trainer_name"] = "nnUNetTrainer"
-                        torch.save(checkpoint, checkpoint_path, _use_new_zipfile_serialization=False)
-                        console.print(f"[yellow]Fixed trainer name in {checkpoint_name}[/yellow]")
-                except Exception as e:
-                    console.print(f"[red]Warning: Could not fix trainer name in {checkpoint_name}: {e}[/red]")
+        # Look in fold_0/ first
+        for name in checkpoint_names:
+            p = os.path.join(self.model_dir, "fold_0", name)
+            if os.path.exists(p):
+                ckpt_path = p
                 break
 
-    def process_single_file(self, input_path, output_path):
-        """Process a single TIF file through the complete pipeline"""
-        try:
-            # Skip if output already exists
-            if os.path.exists(output_path):
-                return True, f"Skipped (already exists): {os.path.basename(input_path)}"
+        # Fallback to model root
+        if ckpt_path is None:
+            for name in checkpoint_names:
+                p = os.path.join(self.model_dir, name)
+                if os.path.exists(p):
+                    ckpt_path = p
+                    break
 
-            # Step 1: Load and downscale
+        if ckpt_path is None:
+            console.print("[yellow]Warning: No checkpoint found to fix trainer name[/yellow]")
+            return
+
+        try:
+            checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            orig = checkpoint.get("trainer_name", "")
+            if orig != "nnUNetTrainer":
+                console.print(f"[yellow]Fixing trainer_name '{orig}' → 'nnUNetTrainer'[/yellow]")
+                backup_path = ckpt_path + ".backup"
+                if not os.path.exists(backup_path):
+                    shutil.copy2(ckpt_path, backup_path)
+                checkpoint["trainer_name"] = "nnUNetTrainer"
+                torch.save(checkpoint, ckpt_path, _use_new_zipfile_serialization=False)
+            else:
+                console.print(f"[green]Trainer name OK: {orig}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not fix trainer name: {e}[/yellow]")
+
+    def process_batch(self, input_files, output_files):
+        """Process a batch of files similar to the working script"""
+        # Prepare temporary directory for this batch
+        batch_id = os.path.basename(input_files[0]).split('.')[0]
+        temp_input_dir = os.path.join(os.environ["nnUNet_raw"], "Dataset082_scrollmask2", "imagesTs")
+        temp_output_dir = os.path.join(os.environ["nnUNet_results"], "Dataset082_scrollmask2", f"batch_{batch_id}")
+
+        os.makedirs(temp_input_dir, exist_ok=True)
+        os.makedirs(temp_output_dir, exist_ok=True)
+
+        # Clean up any existing files in temp directories
+        for f in os.listdir(temp_input_dir):
+            os.remove(os.path.join(temp_input_dir, f))
+
+        # Process all files in batch
+        processed_files = []
+        file_mapping = {}  # Map temp names to original names
+
+        for input_path, output_path in zip(input_files, output_files):
+            if os.path.exists(output_path):
+                console.print(f"[yellow]Skipping existing: {os.path.basename(output_path)}[/yellow]")
+                continue
+
+            # Load and downscale
             original_image = imread(input_path)
             original_dtype = original_image.dtype
 
@@ -139,78 +185,97 @@ class ScrollMaskProcessor:
                 anti_aliasing=True
             ).astype(original_dtype)
 
-            # Step 2: Create temporary file for inference
-            temp_dir = Path(config.temp_dir) / "processing"
-            temp_dir.mkdir(parents=True, exist_ok=True)
+            # Save with proper naming
+            base_filename = os.path.splitext(os.path.basename(input_path))[0]
+            nnunet_filename = f"{base_filename}_0000.tif"
+            nnunet_path = os.path.join(temp_input_dir, nnunet_filename)
 
-            temp_input = temp_dir / f"temp_{os.getpid()}_{os.path.basename(input_path)}"
-            temp_output = temp_dir / f"temp_{os.getpid()}_output.nii.gz"
+            imsave(nnunet_path, downscaled_image, check_contrast=False)
 
-            # Save downscaled image temporarily
-            imsave(str(temp_input), downscaled_image, check_contrast=False)
+            processed_files.append((input_path, output_path, base_filename, original_image, original_dtype))
+            file_mapping[base_filename] = (input_path, output_path)
 
-            # Step 3: Run inference
-            self.predictor.predict_from_files(
-                [str(temp_input)],
-                str(temp_dir),
-                save_probabilities=False,
-                overwrite=True,
-                num_processes_preprocessing=1,
-                num_processes_segmentation_export=1,
-                folder_with_segs_from_prev_stage=None,
-                num_parts=1,
-                part_id=0
-            )
+        if not processed_files:
+            return 0  # Nothing to process
 
-            # Find the prediction output
-            prediction_files = list(temp_dir.glob("*.nii.gz"))
-            if not prediction_files:
-                raise RuntimeError("No prediction output found")
+        # Run inference on the entire directory (like the working script)
+        console.print(f"[blue]Running batch inference on {len(processed_files)} files...[/blue]")
 
-            prediction_path = prediction_files[0]
+        self.predictor.predict_from_files(
+            temp_input_dir,  # Directory path, not list
+            temp_output_dir,
+            save_probabilities=False,
+            overwrite=True,
+            num_processes_preprocessing=2,  # Match working script
+            num_processes_segmentation_export=2,  # Match working script
+            folder_with_segs_from_prev_stage=None,
+            num_parts=1,
+            part_id=0
+        )
 
-            # Step 4: Load prediction and apply threshold
-            pred_nii = nib.load(str(prediction_path))
-            prediction = pred_nii.get_fdata()
-            prediction = np.squeeze(prediction)
+        # Process results
+        success_count = 0
+        for input_path, output_path, base_filename, original_image, original_dtype in processed_files:
+            # Find the prediction file
+            prediction_path = None
+            possible_names = [
+                f"{base_filename}.tif",
+                f"{base_filename}.nii.gz",
+                f"{base_filename}_0000.tif",
+                f"{base_filename}_0000.nii.gz"
+            ]
 
-            # Convert to binary mask
-            binary_mask = (prediction >= self.threshold).astype(np.uint8)
+            for name in possible_names:
+                path = os.path.join(temp_output_dir, name)
+                if os.path.exists(path):
+                    prediction_path = path
+                    break
 
-            # Step 5: Upscale mask to original size
-            upscaled_mask = resize(
-                binary_mask,
-                original_image.shape,
-                order=0,  # Nearest neighbor for binary mask
-                preserve_range=True,
-                anti_aliasing=False
-            ).astype(np.uint8)
+            if not prediction_path:
+                console.print(f"[red]No prediction found for {base_filename}[/red]")
+                continue
 
-            # Step 6: Apply mask to original image
-            masked_image = original_image * upscaled_mask
+            try:
+                # Load prediction
+                if prediction_path.endswith('.nii.gz'):
+                    pred_nii = nib.load(prediction_path)
+                    prediction = pred_nii.get_fdata()
+                else:
+                    prediction = imread(prediction_path)
 
-            # Step 7: Save result
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            imsave(output_path, masked_image.astype(original_dtype), check_contrast=False)
+                prediction = np.squeeze(prediction)
 
-            # Clean up temporary files
-            temp_input.unlink(missing_ok=True)
-            for temp_file in temp_dir.glob(f"temp_{os.getpid()}*"):
-                temp_file.unlink(missing_ok=True)
+                # Convert to binary mask
+                binary_mask = (prediction >= self.threshold).astype(np.uint8)
 
-            return True, f"Processed: {os.path.basename(input_path)}"
+                # Upscale mask
+                upscaled_mask = resize(
+                    binary_mask,
+                    original_image.shape,
+                    order=0,
+                    preserve_range=True,
+                    anti_aliasing=False
+                ).astype(np.uint8)
 
-        except Exception as e:
-            return False, f"Error processing {os.path.basename(input_path)}: {str(e)}"
+                # Apply mask
+                masked_image = original_image * upscaled_mask
 
+                # Save result
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                imsave(output_path, masked_image.astype(original_dtype), check_contrast=False)
 
-def process_file_wrapper(args):
-    """Wrapper function for multiprocessing"""
-    input_path, output_path, model_dir, threshold, downscale_factor = args
+                console.print(f"[green]✓ Processed: {os.path.basename(output_path)}[/green]")
+                success_count += 1
 
-    # Create processor instance in each worker
-    processor = ScrollMaskProcessor(model_dir, threshold, downscale_factor)
-    return processor.process_single_file(input_path, output_path)
+            except Exception as e:
+                console.print(f"[red]✗ Error processing {base_filename}: {e}[/red]")
+
+        # Clean up temp files
+        shutil.rmtree(temp_output_dir, ignore_errors=True)
+        for f in os.listdir(temp_input_dir):
+            os.remove(os.path.join(temp_input_dir, f))
+
+        return success_count
 
 
 def get_file_pairs(input_dir, output_dir):
@@ -231,13 +296,13 @@ def get_file_pairs(input_dir, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Process TIF slices with nnUNet masking pipeline',
+        description='Process TIF slices with nnUNet masking pipeline (batch mode)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python process_scroll_masks.py
-  python process_scroll_masks.py --input ./volumes/20231117161658 --output ./volumes_masked/20231117161658
-  python process_scroll_masks.py --workers 4 --threshold 0.3
+  python process_scroll_masks_batch.py
+  python process_scroll_masks_batch.py --batch-size 100
+  python process_scroll_masks_batch.py --input ./volumes/20231117161658 --output ./volumes_masked/20231117161658
         """
     )
 
@@ -251,14 +316,14 @@ Examples:
                         help=f'Downscale factor (default: {config.downscale_factor})')
     parser.add_argument('--threshold', type=float, default=config.threshold,
                         help=f'Mask threshold (default: {config.threshold})')
-    parser.add_argument('--workers', type=int, default=config.n_workers,
-                        help='Number of parallel workers (default: auto-detect)')
+    parser.add_argument('--batch-size', type=int, default=config.batch_size,
+                        help=f'Number of files to process per batch (default: {config.batch_size})')
     parser.add_argument('--resume', action='store_true',
                         help='Resume processing (skip existing output files)')
 
     args = parser.parse_args()
 
-    console.print(Panel("[bold blue]Scroll Mask Processor[/bold blue]", title="Starting"))
+    console.print(Panel("[bold blue]Batch Scroll Mask Processor[/bold blue]", title="Starting"))
 
     # Validate inputs
     if not os.path.exists(args.input):
@@ -267,7 +332,6 @@ Examples:
 
     if not os.path.exists(args.model):
         console.print(f"[red]Error: Model directory {args.model} does not exist![/red]")
-        console.print("[yellow]Please run setup.py first or check the model path.[/yellow]")
         return 1
 
     # Get file pairs
@@ -290,9 +354,6 @@ Examples:
         console.print("[green]No files to process![/green]")
         return 0
 
-    # Setup workers
-    n_workers = args.workers or min(multiprocessing.cpu_count(), len(file_pairs))
-
     # Display configuration
     table = Table(title="Configuration")
     table.add_column("Setting", style="cyan")
@@ -302,7 +363,7 @@ Examples:
     table.add_row("Output Directory", args.output)
     table.add_row("Model Directory", args.model)
     table.add_row("Files to Process", str(len(file_pairs)))
-    table.add_row("Workers", str(n_workers))
+    table.add_row("Batch Size", str(args.batch_size))
     table.add_row("Downscale Factor", str(args.downscale))
     table.add_row("Threshold", str(args.threshold))
     table.add_row("Resume Mode", "Yes" if args.resume else "No")
@@ -312,16 +373,12 @@ Examples:
     # Create output directory
     os.makedirs(args.output, exist_ok=True)
 
-    # Prepare arguments for workers
-    worker_args = [
-        (input_path, output_path, args.model, args.threshold, args.downscale)
-        for input_path, output_path in file_pairs
-    ]
+    # Initialize processor
+    processor = BatchScrollMaskProcessor(args.model, args.threshold, args.downscale)
 
-    # Process files
-    successful = 0
-    failed = 0
-    errors = []
+    # Process in batches
+    total_processed = 0
+    total_batches = (len(file_pairs) + args.batch_size - 1) // args.batch_size
 
     with Progress(
             SpinnerColumn(),
@@ -332,68 +389,26 @@ Examples:
             console=console
     ) as progress:
 
-        if n_workers == 1:
-            # Sequential processing
-            task = progress.add_task("[cyan]Processing files...", total=len(worker_args))
+        task = progress.add_task(f"[cyan]Processing {total_batches} batches...", total=len(file_pairs))
 
-            for args_tuple in worker_args:
-                success, message = process_file_wrapper(args_tuple)
-                if success:
-                    successful += 1
-                    progress.console.print(f"[green]✓[/green] {message}")
-                else:
-                    failed += 1
-                    errors.append(message)
-                    progress.console.print(f"[red]✗[/red] {message}")
-                progress.update(task, advance=1)
-        else:
-            # Parallel processing
-            task = progress.add_task("[cyan]Processing files...", total=len(worker_args))
+        for i in range(0, len(file_pairs), args.batch_size):
+            batch = file_pairs[i:i + args.batch_size]
+            batch_input_files = [pair[0] for pair in batch]
+            batch_output_files = [pair[1] for pair in batch]
 
-            with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                futures = {executor.submit(process_file_wrapper, args_tuple): args_tuple
-                           for args_tuple in worker_args}
+            batch_num = i // args.batch_size + 1
+            console.print(f"\n[blue]Processing batch {batch_num}/{total_batches} ({len(batch)} files)...[/blue]")
 
-                for future in as_completed(futures):
-                    try:
-                        success, message = future.result()
-                        if success:
-                            successful += 1
-                            if not message.startswith("Skipped"):
-                                progress.console.print(f"[green]✓[/green] {message}")
-                        else:
-                            failed += 1
-                            errors.append(message)
-                            progress.console.print(f"[red]✗[/red] {message}")
-                    except Exception as e:
-                        failed += 1
-                        args_tuple = futures[future]
-                        error_msg = f"Unexpected error processing {os.path.basename(args_tuple[0])}: {e}"
-                        errors.append(error_msg)
-                        progress.console.print(f"[red]✗[/red] {error_msg}")
+            processed = processor.process_batch(batch_input_files, batch_output_files)
+            total_processed += processed
 
-                    progress.update(task, advance=1)
+            progress.update(task, advance=len(batch))
 
     # Final summary
-    summary_table = Table(title="Processing Summary")
-    summary_table.add_column("Result", style="cyan")
-    summary_table.add_column("Count", justify="right", style="magenta")
+    console.print(Panel(f"[green]Successfully processed {total_processed} files![/green]", title="Complete"))
+    console.print(f"[green]Masked images saved to: {args.output}[/green]")
 
-    summary_table.add_row("Successfully Processed", str(successful))
-    summary_table.add_row("Failed", str(failed))
-    summary_table.add_row("Total", str(successful + failed))
-
-    console.print(summary_table)
-
-    if successful > 0:
-        console.print(Panel(f"[green]Masked images saved to: {args.output}[/green]", title="Success"))
-
-    if errors:
-        console.print(
-            Panel("\n".join(errors[:10]) + (f"\n... and {len(errors) - 10} more errors" if len(errors) > 10 else ""),
-                  title="[red]Errors[/red]"))
-
-    return 0 if failed == 0 else 1
+    return 0
 
 
 if __name__ == "__main__":
