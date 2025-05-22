@@ -1,0 +1,11 @@
+{
+    "channel_names": {
+        "0": "Zscore"
+    },
+    "labels": {
+        "background": 0,
+        "case": 1
+    },
+    "numTraining": 19,
+    "file_ending": ".tif"
+}
