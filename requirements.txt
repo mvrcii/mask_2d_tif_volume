@@ -1,10 +1,10 @@
 nnunetv2
+torch
+torchvision
 numpy
 scikit-image
 nibabel
-tqdm
-matplotlib
-pillow
-requests
-chardet
 rich
+requests
+beautifulsoup4
+chardet
