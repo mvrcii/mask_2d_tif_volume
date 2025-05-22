@@ -1,0 +1,143 @@
+
+#######################################################################
+Please cite the following paper when using nnU-Net:
+Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2021). nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
+#######################################################################
+ 
+2025-04-22 15:54:17.992703: do_dummy_2d_data_aug: False 
+2025-04-22 15:54:17.992930: Using splits from existing split file: /mnt/raid_nvme/datasets/nnUNet_preprocessed/Dataset082_scrollmask2/splits_final.json 
+2025-04-22 15:54:17.992979: The split file contains 5 splits. 
+2025-04-22 15:54:17.992993: Desired fold for training: 0 
+2025-04-22 15:54:17.993003: This split has 18 training and 1 validation cases. 
+2025-04-22 15:54:20.576245: Using torch.compile... 
+
+This is the configuration used by this training:
+Configuration name: 2d
+ {'data_identifier': 'nnUNetPlans_2d', 'preprocessor_name': 'DefaultPreprocessor', 'batch_size': 2, 'patch_size': [1536, 1536], 'median_image_size_in_voxels': [1675.0, 2275.0], 'spacing': [1.0, 1.0], 'normalization_schemes': ['ZScoreNormalization'], 'use_mask_for_norm': [False], 'resampling_fn_data': 'resample_data_or_seg_to_shape', 'resampling_fn_seg': 'resample_data_or_seg_to_shape', 'resampling_fn_data_kwargs': {'is_seg': False, 'order': 3, 'order_z': 0, 'force_separate_z': None}, 'resampling_fn_seg_kwargs': {'is_seg': True, 'order': 1, 'order_z': 0, 'force_separate_z': None}, 'resampling_fn_probabilities': 'resample_data_or_seg_to_shape', 'resampling_fn_probabilities_kwargs': {'is_seg': False, 'order': 1, 'order_z': 0, 'force_separate_z': None}, 'architecture': {'network_class_name': 'dynamic_network_architectures.architectures.unet.PlainConvUNet', 'arch_kwargs': {'n_stages': 9, 'features_per_stage': [32, 64, 128, 256, 512, 512, 512, 512, 512], 'conv_op': 'torch.nn.modules.conv.Conv2d', 'kernel_sizes': [[3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 3], [3, 3]], 'strides': [[1, 1], [2, 2], [2, 2], [2, 2], [2, 2], [2, 2], [2, 2], [2, 2], [2, 2]], 'n_conv_per_stage': [2, 2, 2, 2, 2, 2, 2, 2, 2], 'n_conv_per_stage_decoder': [2, 2, 2, 2, 2, 2, 2, 2], 'conv_bias': True, 'norm_op': 'torch.nn.modules.instancenorm.InstanceNorm2d', 'norm_op_kwargs': {'eps': 1e-05, 'affine': True}, 'dropout_op': None, 'dropout_op_kwargs': None, 'nonlin': 'torch.nn.LeakyReLU', 'nonlin_kwargs': {'inplace': True}}, '_kw_requires_import': ['conv_op', 'norm_op', 'dropout_op', 'nonlin']}, 'batch_dice': True} 
+ 
+These are the global plan.json settings:
+ {'dataset_name': 'Dataset082_scrollmask2', 'plans_name': 'nnUNetPlans', 'original_median_spacing_after_transp': [999.0, 1.0, 1.0], 'original_median_shape_after_transp': [1, 1675, 2275], 'image_reader_writer': 'NaturalImage2DIO', 'transpose_forward': [0, 1, 2], 'transpose_backward': [0, 1, 2], 'experiment_planner_used': 'ExperimentPlanner', 'label_manager': 'LabelManager', 'foreground_intensity_properties_per_channel': {'0': {'max': 65535.0, 'mean': 12284.06640625, 'median': 99.0, 'min': 0.0, 'percentile_00_5': 0.0, 'percentile_99_5': 49453.0, 'std': 18195.642578125}}} 
+ 
+2025-04-22 15:54:21.211277: unpacking dataset... 
+2025-04-22 15:54:24.659479: unpacking done... 
+2025-04-22 15:54:24.659928: Unable to plot network architecture: nnUNet_compile is enabled! 
+2025-04-22 15:54:24.663468:  
+2025-04-22 15:54:24.663513: Epoch 0 
+2025-04-22 15:54:24.663566: Current learning rate: 0.01 
+2025-04-22 15:55:57.399528: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_0_train_val.gif 
+2025-04-22 15:56:01.138140: train_loss -0.6661 
+2025-04-22 15:56:01.138247: val_loss -0.8454 
+2025-04-22 15:56:01.138274: Pseudo dice [np.float32(0.9695)] 
+2025-04-22 15:56:01.138308: Epoch time: 96.48 s 
+2025-04-22 15:56:01.138329: Yayy! New best EMA pseudo Dice: 0.9695000052452087 
+2025-04-22 15:56:01.700908:  
+2025-04-22 15:56:01.701184: Epoch 1 
+2025-04-22 15:56:01.701238: Current learning rate: 0.00999 
+2025-04-22 15:56:58.990664: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_1_train_val.gif 
+2025-04-22 15:57:02.550100: train_loss -0.8968 
+2025-04-22 15:57:02.550203: val_loss -0.9259 
+2025-04-22 15:57:02.550231: Pseudo dice [np.float32(0.9889)] 
+2025-04-22 15:57:02.550266: Epoch time: 60.85 s 
+2025-04-22 15:57:02.550289: Yayy! New best EMA pseudo Dice: 0.9714999794960022 
+2025-04-22 15:57:03.221864:  
+2025-04-22 15:57:03.221964: Epoch 2 
+2025-04-22 15:57:03.222021: Current learning rate: 0.00998 
+2025-04-22 15:58:00.181243: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_2_train_val.gif 
+2025-04-22 15:58:03.743330: train_loss -0.9357 
+2025-04-22 15:58:03.743431: val_loss -0.9673 
+2025-04-22 15:58:03.743459: Pseudo dice [np.float32(0.9919)] 
+2025-04-22 15:58:03.743492: Epoch time: 60.52 s 
+2025-04-22 15:58:03.743510: Yayy! New best EMA pseudo Dice: 0.9735000133514404 
+2025-04-22 15:58:04.454051:  
+2025-04-22 15:58:04.454204: Epoch 3 
+2025-04-22 15:58:04.454256: Current learning rate: 0.00997 
+2025-04-22 15:59:01.533868: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_3_train_val.gif 
+2025-04-22 15:59:05.101038: train_loss -0.9487 
+2025-04-22 15:59:05.101145: val_loss -0.9764 
+2025-04-22 15:59:05.101183: Pseudo dice [np.float32(0.9948)] 
+2025-04-22 15:59:05.101228: Epoch time: 60.65 s 
+2025-04-22 15:59:05.101262: Yayy! New best EMA pseudo Dice: 0.975600004196167 
+2025-04-22 15:59:05.808788:  
+2025-04-22 15:59:05.808953: Epoch 4 
+2025-04-22 15:59:05.809004: Current learning rate: 0.00996 
+2025-04-22 16:00:02.787344: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_4_train_val.gif 
+2025-04-22 16:00:06.355234: train_loss -0.9042 
+2025-04-22 16:00:06.355332: val_loss -0.9338 
+2025-04-22 16:00:06.355360: Pseudo dice [np.float32(0.9845)] 
+2025-04-22 16:00:06.355391: Epoch time: 60.55 s 
+2025-04-22 16:00:06.355413: Yayy! New best EMA pseudo Dice: 0.9764999747276306 
+2025-04-22 16:00:07.035583:  
+2025-04-22 16:00:07.035695: Epoch 5 
+2025-04-22 16:00:07.035748: Current learning rate: 0.00995 
+2025-04-22 16:01:04.164319: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_5_train_val.gif 
+2025-04-22 16:01:07.719073: train_loss -0.9203 
+2025-04-22 16:01:07.719233: val_loss -0.9692 
+2025-04-22 16:01:07.719260: Pseudo dice [np.float32(0.9934)] 
+2025-04-22 16:01:07.719295: Epoch time: 60.68 s 
+2025-04-22 16:01:07.719317: Yayy! New best EMA pseudo Dice: 0.9782000184059143 
+2025-04-22 16:01:08.422981:  
+2025-04-22 16:01:08.423101: Epoch 6 
+2025-04-22 16:01:08.423154: Current learning rate: 0.00995 
+2025-04-22 16:02:05.392759: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_6_train_val.gif 
+2025-04-22 16:02:08.942233: train_loss -0.952 
+2025-04-22 16:02:08.942321: val_loss -0.9788 
+2025-04-22 16:02:08.942342: Pseudo dice [np.float32(0.9949)] 
+2025-04-22 16:02:08.942369: Epoch time: 60.52 s 
+2025-04-22 16:02:08.942386: Yayy! New best EMA pseudo Dice: 0.9799000024795532 
+2025-04-22 16:02:09.673292:  
+2025-04-22 16:02:09.673406: Epoch 7 
+2025-04-22 16:02:09.673459: Current learning rate: 0.00994 
+2025-04-22 16:03:06.690328: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_7_train_val.gif 
+2025-04-22 16:03:10.246842: train_loss -0.9545 
+2025-04-22 16:03:10.246962: val_loss -0.9785 
+2025-04-22 16:03:10.246987: Pseudo dice [np.float32(0.9952)] 
+2025-04-22 16:03:10.247020: Epoch time: 60.57 s 
+2025-04-22 16:03:10.247096: Yayy! New best EMA pseudo Dice: 0.9814000129699707 
+2025-04-22 16:03:10.979273:  
+2025-04-22 16:03:10.979416: Epoch 8 
+2025-04-22 16:03:10.979473: Current learning rate: 0.00993 
+2025-04-22 16:04:08.319611: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_8_train_val.gif 
+2025-04-22 16:04:11.875193: train_loss -0.9577 
+2025-04-22 16:04:11.875298: val_loss -0.9809 
+2025-04-22 16:04:11.875331: Pseudo dice [np.float32(0.9955)] 
+2025-04-22 16:04:11.875364: Epoch time: 60.9 s 
+2025-04-22 16:04:11.875386: Yayy! New best EMA pseudo Dice: 0.9828000068664551 
+2025-04-22 16:04:12.592448:  
+2025-04-22 16:04:12.592587: Epoch 9 
+2025-04-22 16:04:12.592640: Current learning rate: 0.00992 
+2025-04-22 16:05:09.965270: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_9_train_val.gif 
+2025-04-22 16:05:13.524346: train_loss -0.9621 
+2025-04-22 16:05:13.524453: val_loss -0.9727 
+2025-04-22 16:05:13.524491: Pseudo dice [np.float32(0.9931)] 
+2025-04-22 16:05:13.524523: Epoch time: 60.93 s 
+2025-04-22 16:05:13.524545: Yayy! New best EMA pseudo Dice: 0.9837999939918518 
+2025-04-22 16:05:14.232856:  
+2025-04-22 16:05:14.232963: Epoch 10 
+2025-04-22 16:05:14.233015: Current learning rate: 0.00991 
+2025-04-22 16:06:11.355062: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_10_train_val.gif 
+2025-04-22 16:06:14.919254: train_loss -0.961 
+2025-04-22 16:06:14.919352: val_loss -0.9758 
+2025-04-22 16:06:14.919380: Pseudo dice [np.float32(0.9945)] 
+2025-04-22 16:06:14.919412: Epoch time: 60.69 s 
+2025-04-22 16:06:14.919436: Yayy! New best EMA pseudo Dice: 0.9848999977111816 
+2025-04-22 16:06:15.611078:  
+2025-04-22 16:06:15.611288: Epoch 11 
+2025-04-22 16:06:15.611346: Current learning rate: 0.0099 
+2025-04-22 16:07:13.018007: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_11_train_val.gif 
+2025-04-22 16:07:16.769488: train_loss -0.9654 
+2025-04-22 16:07:16.769686: val_loss -0.9837 
+2025-04-22 16:07:16.769752: Pseudo dice [np.float32(0.9959)] 
+2025-04-22 16:07:16.769906: Epoch time: 61.16 s 
+2025-04-22 16:07:16.769972: Yayy! New best EMA pseudo Dice: 0.9860000014305115 
+2025-04-22 16:07:18.053784:  
+2025-04-22 16:07:18.054071: Epoch 12 
+2025-04-22 16:07:18.054201: Current learning rate: 0.00989 
+2025-04-22 16:08:15.618973: Saved GIF visualization to /mnt/raid_nvme/datasets/nnUNet_results/Dataset082_scrollmask2/nnUNetTrainerWorkshop__nnUNetPlans__2d/fold_0/epoch_12_train_val.gif 
+2025-04-22 16:08:19.208821: train_loss -0.9724 
+2025-04-22 16:08:19.208933: val_loss -0.9804 
+2025-04-22 16:08:19.208959: Pseudo dice [np.float32(0.9951)] 
+2025-04-22 16:08:19.208992: Epoch time: 61.16 s 
+2025-04-22 16:08:19.209013: Yayy! New best EMA pseudo Dice: 0.9868999719619751 
+2025-04-22 16:08:19.942041:  
+2025-04-22 16:08:19.942260: Epoch 13 
+2025-04-22 16:08:19.942325: Current learning rate: 0.00988 
