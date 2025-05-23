@@ -7,6 +7,7 @@ Automatically skips files that already exist in output directory.
 """
 
 import argparse
+import json
 import os
 import pathlib
 import queue
@@ -58,6 +59,33 @@ def parse_args():
         input_path = pathlib.Path(args.input_dir)
         args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
     return args
+
+
+def copy_and_modify_meta_json(input_dir, output_dir):
+    """Copy meta.json from input to output dir, adding 'masked' to the name field"""
+    input_meta_path = pathlib.Path(input_dir) / "meta.json"
+    output_meta_path = pathlib.Path(output_dir) / "meta.json"
+
+    if not input_meta_path.exists():
+        console.print(f"[yellow]Warning: meta.json not found in {input_dir}[/yellow]")
+        console.print("[yellow]This may cause issues with volume processing tools![/yellow]")
+        return
+
+    try:
+        with open(input_meta_path, 'r') as f:
+            meta_data = json.load(f)
+
+        # Modify the name field to add ", masked"
+        if "name" in meta_data:
+            meta_data["name"] = meta_data["name"] + ", masked"
+
+        with open(output_meta_path, 'w') as f:
+            json.dump(meta_data, f)
+
+        console.print(f"[green]✓ Copied and updated meta.json[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Error processing meta.json: {e}[/red]")
 
 
 def get_pending_files(args):
@@ -272,6 +300,8 @@ def main():
     args = parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    copy_and_modify_meta_json(args.input_dir, args.output_dir)
 
     # Get file counts for resume functionality
     all_input_files = list(pathlib.Path(args.input_dir).glob("*.tif"))
