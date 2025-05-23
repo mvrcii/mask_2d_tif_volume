@@ -56,18 +56,7 @@ def parse_args():
     # Set default output directory if not provided
     if args.output_dir is None:
         input_path = pathlib.Path(args.input_dir)
-        if 'volumes' in input_path.parts:
-            # Replace 'volumes' with 'volumes_masked' in the path
-            parts = list(input_path.parts)
-            for i, part in enumerate(parts):
-                if part == 'volumes':
-                    parts[i] = 'volumes_masked'
-                    break
-            args.output_dir = str(pathlib.Path(*parts))
-        else:
-            # Fallback: append '_masked' to the input directory name
-            args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
-
+        args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
     return args
 
 
