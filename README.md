@@ -35,6 +35,5 @@ python fast_masking.py --input-dir ~/scrollprize/data/scroll4.volpkg/volumes/202
 
 5. Masked tif volume to uint8 ome-zarr:
 ```shell
-python scroll_to_ome.py ~/scrollprize/data/scroll4.volpkg/volumes_masked/20231117161658 \
-~/scrollprize/data/scroll4.volpkg/volumes_zarr/20231117161658_uint8_8um_53kev_masked.zarr --obytes 1
+python python scroll_to_zarr.py ~/scrollprize/data/scroll4.volpkg/volumes/20231117161658_masked ~/scrollprize/data/scroll4.volpkg/volumes/20231117161658_masked_uint8.zarr --obytes 1
 ```
