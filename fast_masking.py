@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument('--input-dir', type=str, required=True,
                         help='Input directory containing .tif files')
     parser.add_argument('--output-dir', type=str,
-                        help='Output directory for processed files (default: input-dir with volumes→volumes_masked)')
+                        help='Output directory for processed files (default: input-dir with volumes → volumes_masked)')
     parser.add_argument('--model-dir', type=str, default='./models/nnUNetTrainerV2__nnUNetPlans__2d',
                         help='nnUNet model directory (default: ./models/nnUNetTrainerV2__nnUNetPlans__2d)')
     parser.add_argument('--temp-dir', type=str, default='/dev/shm/nnunet_tmp',
@@ -186,7 +186,6 @@ def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter
 
         ckpt = next(p for p in (pathlib.Path(args.model_dir) / "fold_0").glob("checkpoint_*.pth"))
         predictor.initialize_from_trained_model_folder(args.model_dir, use_folds=(0,), checkpoint_name=ckpt.name)
-
         predictor.network.to(device).half()
 
         console.print("[yellow]Compiling model with torch.compile...[/yellow]")
