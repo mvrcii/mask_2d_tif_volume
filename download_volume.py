@@ -236,7 +236,8 @@ def format_size(size_bytes):
 
 def interactive_setup(data_dir):
     """Interactive setup to get source URL and confirm target directory"""
-    console.print(Panel("[bold blue]TIF File Downloader - Interactive Setup[/bold blue]", title="Welcome", expand=False))
+    console.print(
+        Panel("[bold blue]TIF File Downloader - Interactive Setup[/bold blue]", title="Welcome", expand=False))
 
     while True:
         source_url = Prompt.ask("[green]Enter the source URL containing TIF files[/green]")
@@ -285,7 +286,8 @@ def download_tifs(source_url, target_dir, check_only=False):
 
     mode_text = "[bold yellow]SCAN MODE[/bold yellow]" if check_only else "[bold blue]DOWNLOAD MODE[/bold blue]"
     console.print(Panel(
-        f"{mode_text} - TIF File Downloader\n[green]Source:[/green] {source_url}\n[green]Target:[/green] {target_path}",expand=False))
+        f"{mode_text} - TIF File Downloader\n[green]Source:[/green] {source_url}\n[green]Target:[/green] {target_path}",
+        expand=False))
 
     tif_files = get_tif_files_from_directory(source_url)
 
@@ -325,9 +327,6 @@ def download_tifs(source_url, target_dir, check_only=False):
         else:
             # Show what happened to corrupted files
             skipped_corrupted = len(corrupted_files) - len(files_to_redownload)
-            if files_to_redownload:
-                table.add_row("[yellow]Corrupted (to redownload)[/yellow]",
-                              f"[yellow]{len(files_to_redownload)}[/yellow]", "")
             if skipped_corrupted > 0:
                 table.add_row("[red]Corrupted (skipped)[/red]", f"[red]{skipped_corrupted}[/red]", "")
 
@@ -337,7 +336,6 @@ def download_tifs(source_url, target_dir, check_only=False):
                                                                             'estimated_remaining_size'] > 0 else "Unknown")
 
     if size_info['avg_file_size'] > 0:
-        table.add_row("Average file size", "", format_size(size_info['avg_file_size']))
         completion_pct = (len(existing_files) / len(tif_files)) * 100 if tif_files else 0
         table.add_row("Progress", f"{completion_pct:.1f}%", "")
 
