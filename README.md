@@ -2,9 +2,8 @@
 
 This repository contains a pipeline for masking 2D TIF slices of a scroll using a trained nnUNetv2 model.
 
-**Why this tool?** Provides fast and easy masking capability for TIFF volumes to significantly reduce storage size for
-further scroll analysis. Unlike simple thresholding techniques that fail across different scroll conditions, our
-nnUNetv2-based approach delivers robust segmentation across various scroll datasets.
+**Why this tool?** Provides fast and easy masking capability for TIFF volumes to significantly reduce storage size for further scroll analysis. Unlike simple thresholding techniques that fail across different scroll conditions, our nnUNetv2-based approach delivers robust segmentation across various scroll datasets.
+
 
 ### Results
 
@@ -77,3 +76,13 @@ python fast_masking.py --input-dir /home/<user>/scrollprize/data/scroll4.volpkg/
 ```bash
 python python scroll_to_zarr.py /home/<user>/scrollprize/data/scroll4.volpkg/volumes/20231117161658_masked /home/<user>/scrollprize/data/scroll4.volpkg/volumes/20231117161658_masked_uint8.zarr --obytes 1
 ```
+
+### Volume Visualization
+
+Generate overview plots of your volumes using the included `volpeek.py` script:
+
+```bash
+python core/visualization/volpeek.py /home/<user>/scrollprize/data/scroll4.volpkg/volumes/20231117161658 --downscale 4 --output scroll4_image
+```
+
+This creates a grid visualization showing sample slices from the volume, useful for quick quality assessment and generating overview images for documentation.
