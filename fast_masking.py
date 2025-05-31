@@ -49,8 +49,8 @@ def parse_args():
                         help='Number of preprocessing workers (default: 16)')
     parser.add_argument('--n-postproc', type=int, default=16,
                         help='Number of postprocessing workers (default: 16)')
-    parser.add_argument('--queue-size', '-q', type=int, default=512,
-                        help='Maximum queue size for buffering (default: 512)')
+    parser.add_argument('--queue-size', '-q', type=int, default=1024,
+                        help='Maximum queue size for buffering (default: 1024)')
 
     args = parser.parse_args()
 
@@ -58,6 +58,7 @@ def parse_args():
     if args.output_dir is None:
         input_path = pathlib.Path(args.input_dir)
         args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
+
     return args
 
 
@@ -67,25 +68,25 @@ def copy_and_modify_meta_json(input_dir, output_dir):
     output_meta_path = pathlib.Path(output_dir) / "meta.json"
 
     if not input_meta_path.exists():
-        console.print(f"[yellow]Warning: meta.json not found in {input_dir}[/yellow]")
-        console.print("[yellow]This may cause issues with volume processing tools![/yellow]")
+        console.print(f"[bold yellow]Warning: meta.json not found in {input_dir}[/bold yellow]")
         return
 
     try:
         with open(input_meta_path, 'r') as f:
             meta_data = json.load(f)
 
-        # Modify the name field to add ", masked"
-        if "name" in meta_data:
-            meta_data["name"] = meta_data["name"] + ", masked"
+        suffix = "masked"
+
+        name_base = meta_data.get("name", "Unknown")
+        meta_data["name"] = f"{name_base}{suffix}"
 
         with open(output_meta_path, 'w') as f:
-            json.dump(meta_data, f)
+            json.dump(meta_data, f, indent=2)
 
-        console.print(f"[green]✓ Copied and updated meta.json[/green]")
+        console.print(f"[bold green]✓ Copied and updated meta.json for {output_format}[/bold green]")
 
     except Exception as e:
-        console.print(f"[red]Error processing meta.json: {e}[/red]")
+        console.print(f"[bold red]Error processing meta.json: {e}[/bold red]")
 
 
 def get_pending_files(args):
@@ -97,7 +98,7 @@ def get_pending_files(args):
     if not output_dir.exists():
         return all_files
 
-    # Clean up any leftover .tmp files from previous interrupted runs
+    # Clean up any leftover .tmp files
     for tmp_file in output_dir.glob("*.tmp"):
         tmp_file.unlink()
 
@@ -118,12 +119,19 @@ def create_status_panel(q_in_size, q_out_size, pre_count, gpu_count, post_count,
         eta_sec = remaining / files_per_sec if files_per_sec > 0 else 0
 
         if eta_sec >= 60:
-            eta_display = f"{int(eta_sec / 60)}m"
+            eta_display = f"{int(eta_sec // 60)}m {int(eta_sec % 60)}s"
         else:
             eta_display = f"{int(eta_sec)}s"
     else:
         files_per_sec = 0
         eta_display = "0s"
+
+    if elapsed_time < 60:
+        elapsed_display = f"{int(elapsed_time)}s"
+    else:
+        mins = int(elapsed_time // 60)
+        secs = int(elapsed_time % 60)
+        elapsed_display = f"{mins}m {secs}s"
 
     status_text = Text()
     status_text.append("Queues: ", style="bold")
@@ -141,6 +149,7 @@ def create_status_panel(q_in_size, q_out_size, pre_count, gpu_count, post_count,
         status_text.append(f"GPU: {avg_gpu_time * 1000:.0f}ms/img ", style="green")
     if files_per_sec > 0:
         status_text.append(f"ETA: {eta_display}", style="magenta")
+    status_text.append(f" | Time: {elapsed_display}", style="magenta")
 
     return Panel(status_text, expand=False, padding=(0, 1))
 
@@ -167,8 +176,10 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
                 continue
 
             try:
-                img = imread(tif_path)
+                img = tifffile.imread(tif_path)
                 original_dtype = img.dtype
+
+                # Apply downscaling
                 downscaled_shape = (
                     img.shape[0] // args.downscale_factor,
                     img.shape[1] // args.downscale_factor
@@ -177,13 +188,15 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
                 img_ds = cv2.resize(img, (downscaled_shape[1], downscaled_shape[0]),
                                     interpolation=cv2.INTER_AREA).astype(original_dtype)
 
+                # Put processed data in queue
                 q_in.put((tif_path.name, img_ds, img.shape, img.dtype.str))
+
                 with pre_counter.get_lock():
                     pre_counter.value += 1
 
             except Exception as read_error:
                 failed_files.append(f"{tif_path.name}: {str(read_error)}")
-                continue  # skip this file, move to next
+                continue
 
     except Exception as e:
         console.print(f"[red]PRE WORKER ERROR: {e}[/red]")
@@ -193,7 +206,7 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
 def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter: Value, gpu_times: list,
              gpu_ready: Event, args):
     try:
-        console.print("[yellow]Initializing GPU and loading model...[/yellow]")
+        console.print(f"[bold magenta]Initializing GPU and loading model...[/bold magenta]")
         device = torch.device('cuda')
         predictor = nnUNetPredictor(tile_step_size=1.0,  # no overlap = fastest (slight quality loss)
                                     use_gaussian=True,
@@ -205,10 +218,10 @@ def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter
         predictor.initialize_from_trained_model_folder(args.model_dir, use_folds=(0,), checkpoint_name=ckpt.name)
         predictor.network.to(device).half()
 
-        console.print("[yellow]Compiling model with torch.compile...[/yellow]")
+        console.print(f"[bold magenta]Compiling model with torch.compile...[/bold magenta]")
         predictor.network = torch.compile(predictor.network)
 
-        console.print("[green]✓ GPU ready! Starting inference...[/green]")
+        console.print(f"[bold green]✓ GPU ready! Starting inference...[/bold green]")
         gpu_ready.set()  # Signal that GPU is ready
 
         pk = np.array(predictor.configuration_manager.pool_op_kernel_sizes)
