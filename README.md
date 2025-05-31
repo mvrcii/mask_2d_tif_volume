@@ -13,11 +13,13 @@ Our `fast_masking.py` script processes raw scroll volumes to generate precise ma
 **Original Volume (Raw TIF slices)**
 ![Original](assets/scroll4.png)
 
+
 **Generated Mask (Binary segmentation)**
 ![Mask](assets/scroll4_mask_only.png)
 
 **Masked Volume (Background removed)**
 ![Masked](assets/scroll4_masked.png)
+
 
 **Performance**: Scroll 4 volume (11,174 slices, 240GB uint16) → processed in ~2 minutes on RTX4090 (24GB) + 96GB RAM +
 32 cores. Output size reduced to 120GB (50% compression).
