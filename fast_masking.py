@@ -50,7 +50,7 @@ def parse_args():
                         help='Number of postprocessing workers (default: 16)')
     parser.add_argument('--queue-size', '-q', type=int, default=1024,
                         help='Maximum queue size for buffering (default: 1024)')
-    parser.add_argument("--output_mask_only", action="store_true",
+    parser.add_argument("--mask_only", action="store_true",
                         help='Output only the mask tif files.')
 
     args = parser.parse_args()
@@ -60,7 +60,10 @@ def parse_args():
     # Set default output directory if not provided
     if args.output_dir is None:
         input_path = pathlib.Path(args.input_dir)
-        args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
+        if args.mask_only:
+            args.output_dir = str(input_path.parent / (input_path.name + '_mask_only'))
+        else:
+            args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
     else:
         args.output_dir = os.path.expanduser(args.output_dir)
 
@@ -183,16 +186,18 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
             try:
                 # Read tif file
                 img = tifffile.imread(tif_path)
-                original_dtype = img.dtype
 
-                # Apply downscaling
-                downscaled_shape = (
-                    img.shape[0] // args.downscale_factor,
-                    img.shape[1] // args.downscale_factor
-                )
+                # # Apply downscaling
+                # downscaled_shape = (
+                #     img.shape[0] // args.downscale_factor,
+                #     img.shape[1] // args.downscale_factor
+                # )
+                #
+                # img_ds = cv2.resize(img, (downscaled_shape[1], downscaled_shape[0]),
+                #                     interpolation=cv2.INTER_AREA).astype(original_dtype)
 
-                img_ds = cv2.resize(img, (downscaled_shape[1], downscaled_shape[0]),
-                                    interpolation=cv2.INTER_AREA).astype(original_dtype)
+                scale = 1.0 / args.downscale_factor
+                img_ds = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA).astype(img.dtype)
 
                 # Put processed data in queue
                 q_in.put((tif_path.name, img_ds, img.shape, img.dtype.str))
@@ -299,13 +304,13 @@ def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_f
                 mask_us = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
 
                 # For now uint8 output is default
-                if args.output_mask_only:
+                if args.mask_only:
                     output_img = (mask_us * 255).astype(np.uint8)
                 else:
                     orig_img = tifffile.imread(pathlib.Path(args.input_dir) / fname).astype(np.dtype(dtype_str))
 
-                    # Mask and scale
-                    output_img = (orig_img * mask_us).astype(np.uint8)
+                    # Mask and scale to uint8
+                    output_img = (orig_img * mask_us >> 8).astype(np.uint8)
 
                 # Save: Atomic write - temp file first, then rename
                 temp_path = output_path.with_suffix('.tmp')
@@ -324,9 +329,56 @@ def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_f
         raise
 
 
+def check_output_directory(output_dir):
+    """Check if output directory exists and prompt user for action"""
+    output_path = pathlib.Path(output_dir)
+
+    if not output_path.exists():
+        return True
+
+    # Check if directory has any .tif files
+    existing_tifs = list(output_path.glob("*.tif"))
+    if not existing_tifs:
+        console.print(f"[yellow]Output directory exists but is empty: {output_dir}[/yellow]")
+        return True
+
+    console.print(f"[bold yellow]Output directory already exists with {len(existing_tifs)} .tif files:[/bold yellow]")
+    console.print(f"  {output_dir}")
+
+    while True:
+        response = input("\nChoose action (override/abort): ").lower().strip()
+        if response in ['override', 'yes', 'y']:
+            console.print("[yellow]Cleaning output directory...[/yellow]")
+            try:
+                # Remove all .tif files and any .tmp files
+                removed_count = 0
+                for tif_file in output_path.glob("*.tif"):
+                    tif_file.unlink()
+                    removed_count += 1
+                for tmp_file in output_path.glob("*.tmp"):
+                    tmp_file.unlink()
+
+                console.print(
+                    f"[bold green]✓ Removed {removed_count} existing .tif files from output directory[/bold green]")
+                return True
+
+            except Exception as e:
+                console.print(f"[bold red]✗ Failed to clean directory: {e}[/bold red]")
+                return False
+
+        elif response in ['abort', 'no', 'n']:
+            console.print("[red]Aborted by user[/red]")
+            return False
+        else:
+            console.print("[red]Invalid choice. Please enter 'override' or 'abort'[/red]")
+
+
 def main():
     freeze_support()
     args = parse_args()
+
+    if not check_output_directory(args.output_dir):
+        return 1
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -446,6 +498,7 @@ def main():
             for failed_file in failed_files:
                 console.print(f"  [red]{failed_file}[/red]")
         return None
+
 
 if __name__ == "__main__":
     sys.exit(main())
