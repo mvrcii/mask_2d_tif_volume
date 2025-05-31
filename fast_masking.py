@@ -24,7 +24,6 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
-from skimage.io import imread
 
 console = Console()
 
@@ -36,7 +35,7 @@ def parse_args():
     parser.add_argument('--input-dir', type=str, required=True,
                         help='Input directory containing .tif files')
     parser.add_argument('--output-dir', type=str,
-                        help='Output directory for processed files (default: input-dir with volumes → volumes_masked)')
+                        help='Output directory for processed files (default: input-dir with _masked suffix)')
     parser.add_argument('--model-dir', type=str, default='./models/nnUNetTrainerV2__nnUNetPlans__2d',
                         help='nnUNet model directory (default: ./models/nnUNetTrainerV2__nnUNetPlans__2d)')
     parser.add_argument('--temp-dir', type=str, default='/dev/shm/nnunet_tmp',
@@ -51,13 +50,19 @@ def parse_args():
                         help='Number of postprocessing workers (default: 16)')
     parser.add_argument('--queue-size', '-q', type=int, default=1024,
                         help='Maximum queue size for buffering (default: 1024)')
+    parser.add_argument("--output_mask_only", action="store_true",
+                        help='Output only the mask tif files.')
 
     args = parser.parse_args()
+
+    args.input_dir = os.path.expanduser(args.input_dir)
 
     # Set default output directory if not provided
     if args.output_dir is None:
         input_path = pathlib.Path(args.input_dir)
         args.output_dir = str(input_path.parent / (input_path.name + '_masked'))
+    else:
+        args.output_dir = os.path.expanduser(args.output_dir)
 
     return args
 
@@ -83,7 +88,7 @@ def copy_and_modify_meta_json(input_dir, output_dir):
         with open(output_meta_path, 'w') as f:
             json.dump(meta_data, f, indent=2)
 
-        console.print(f"[bold green]✓ Copied and updated meta.json for {output_format}[/bold green]")
+        console.print(f"[bold green]✓ Copied and updated meta.json [/bold green]")
 
     except Exception as e:
         console.print(f"[bold red]Error processing meta.json: {e}[/bold red]")
@@ -165,7 +170,7 @@ def pad_to_stride(img: np.ndarray, stride_xy: tuple[int, int]):
 
 def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_counter: Value, failed_files: list,
                args):
-    """Single preprocessing worker - reads from file_queue, outputs to q_in"""
+    """Single preprocessing worker - reads from file_queue, applies downscaling, outputs to q_in"""
     try:
         while not stop.is_set():
             try:
@@ -176,6 +181,7 @@ def pre_worker(file_queue: JoinableQueue, q_in: JoinableQueue, stop: Event, pre_
                 continue
 
             try:
+                # Read tif file
                 img = tifffile.imread(tif_path)
                 original_dtype = img.dtype
 
@@ -265,14 +271,15 @@ def gpu_proc(q_in: JoinableQueue, q_out: JoinableQueue, stop: Event, gpu_counter
 
 
 def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_files: list, args):
-    """Single postprocessing worker - reads from q_out"""
+    """Post-processing worker for TIF files"""
     try:
         out_dir = pathlib.Path(args.output_dir)
 
         while not stop.is_set():
             try:
                 item = q_out.get(timeout=1)
-                if item is None: break
+                if item is None:
+                    break
             except queue.Empty:
                 continue
 
@@ -286,14 +293,23 @@ def post_worker(q_out: JoinableQueue, stop: Event, post_counter: Value, failed_f
                 continue
 
             try:
+                # Prepare mask
                 mask = (logits < 0.5).astype(np.uint8)
                 H, W = orig_shape
                 mask_us = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
-                img = tifffile.imread(pathlib.Path(args.input_dir) / fname).astype(np.dtype(dtype_str))
 
-                # Atomic write: temp file first, then rename
+                # For now uint8 output is default
+                if args.output_mask_only:
+                    output_img = (mask_us * 255).astype(np.uint8)
+                else:
+                    orig_img = tifffile.imread(pathlib.Path(args.input_dir) / fname).astype(np.dtype(dtype_str))
+
+                    # Mask and scale
+                    output_img = (orig_img * mask_us).astype(np.uint8)
+
+                # Save: Atomic write - temp file first, then rename
                 temp_path = output_path.with_suffix('.tmp')
-                tifffile.imwrite(temp_path, img * mask_us)
+                tifffile.imwrite(temp_path, output_img)
                 temp_path.rename(output_path)  # atomic operation
 
                 with post_counter.get_lock():
@@ -317,17 +333,11 @@ def main():
     copy_and_modify_meta_json(args.input_dir, args.output_dir)
 
     # Get file counts for resume functionality
-    all_input_files = list(pathlib.Path(args.input_dir).glob("*.tif"))
     pending_files = get_pending_files(args)
 
-    total_files = len(all_input_files)
-    skipped_files = total_files - len(pending_files)
-    pending_count = len(pending_files)
+    console.print(f"[bold cyan]Items to process:[/bold cyan] {len(pending_files)}")
 
-    if skipped_files > 0:
-        console.print(f"[yellow]Resuming: {skipped_files} files already processed, {pending_count} remaining[/yellow]")
-
-    if pending_count == 0:
+    if len(pending_files) == 0:
         console.print("[green]✓ All files already processed![/green]")
         return 0
 
@@ -370,7 +380,7 @@ def main():
 
     all_processes = pre_workers + [gpu] + post_workers
 
-    console.print(f"[green]Starting {args.n_preproc} pre + 1 GPU + {args.n_postproc} post workers[/green]")
+    console.print(f"[bold green]Starting {args.n_preproc} pre + 1 GPU + {args.n_postproc} post workers[/bold green]")
     for p in all_processes:
         p.start()
 
@@ -395,9 +405,9 @@ def main():
                     pre_counter.value,
                     gpu_counter.value,
                     post_counter.value,
-                    total_files,
-                    pending_count,
-                    skipped_files,
+                    len(pending_files),
+                    len(pending_files),
+                    0,
                     failed_count,
                     elapsed,
                     start_post_count,
@@ -407,7 +417,7 @@ def main():
 
                 # Check if we're done (all files processed or failed)
                 completed_files = post_counter.value + failed_count
-                if completed_files >= pending_count and not any(p.is_alive() for p in pre_workers):
+                if completed_files >= len(pending_files) and not any(p.is_alive() for p in pre_workers):
                     stop.set()
                     break
 
@@ -426,16 +436,16 @@ def main():
         for p in all_processes:
             p.join()
 
-        final_processed = skipped_files + post_counter.value
+        final_processed = post_counter.value
         failed_count = len(failed_files)
 
-        console.print(f"\n[green]✓ Pipeline complete: {final_processed}/{total_files} files processed[/green]")
+        console.print(f"\n[green]✓ Pipeline complete: {final_processed}/{len(pending_files)} files processed[/green]")
 
         if failed_count > 0:
             console.print(f"[red]✗ {failed_count} files failed:[/red]")
             for failed_file in failed_files:
                 console.print(f"  [red]{failed_file}[/red]")
-
+        return None
 
 if __name__ == "__main__":
     sys.exit(main())
